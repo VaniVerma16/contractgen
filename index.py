@@ -1,16 +1,16 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, validator
 from typing import Literal, Optional
-from fpdf import FPDF
 import openai
 import os
+from fpdf import FPDF
 import re
 from dotenv import load_dotenv
-
 load_dotenv()
+from openai import OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
+# ====== FastAPI Setup ======
 app = FastAPI()
 
 class ContractRequest(BaseModel):
@@ -22,10 +22,10 @@ class ContractRequest(BaseModel):
     party_b: str
     duration: str
     clause_query: str
-    property_address: Optional[str] = None
-    position: Optional[str] = None
-    goods_description: Optional[str] = None
-    scope: Optional[str] = None
+    property_address: Optional[str] = None  # for lease
+    position: Optional[str] = None          # for employment
+    goods_description: Optional[str] = None # for sales
+    scope: Optional[str] = None             # for noncompete
     jurisdiction: str = "New Delhi"
 
     @validator('party_a', 'party_b')
@@ -40,8 +40,7 @@ class ContractRequest(BaseModel):
             raise ValueError("Duration must be in format '# year/years/month/months/day/days'")
         return v
 
-# --- Clause Generator ---
-
+# ====== Clause Retrieval and Refinement ======
 def retrieve_clause(query: str, contract_type: str) -> str:
     specialized_clause_banks = {
         "nda": [
@@ -197,7 +196,7 @@ def refine_clause_with_legal_expertise(clause: str, contract_type: str) -> str:
             ]
         }
     }
-
+    
     prompt = f"""As a Supreme Court of India registered contract lawyer, refine this {contract_type} clause:
 
 **Original Clause**: {clause}
@@ -205,10 +204,10 @@ def refine_clause_with_legal_expertise(clause: str, contract_type: str) -> str:
 **Legal Framework**: {LEGAL_PROMPTS[contract_type]['context']}
 
 **Must Include**:
-{"".join(f"✓ {req}" for req in LEGAL_PROMPTS[contract_type]['requirements'])}
+{"".join(f"✓ {req}\n" for req in LEGAL_PROMPTS[contract_type]['requirements'])}
 
 **Good Examples**:
-{"".join(f"• {ex}" for ex in LEGAL_PROMPTS[contract_type]['examples'])}
+{"".join(f"• {ex}\n" for ex in LEGAL_PROMPTS[contract_type]['examples'])}
 
 **Refinement Rules**:
 1. Use active voice with "Shall" for obligations
@@ -218,19 +217,16 @@ def refine_clause_with_legal_expertise(clause: str, contract_type: str) -> str:
 5. Use Rs. for penalties
 
 Refined Clause:"""
-
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo-16k",
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
+    
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo-1106",
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         max_tokens=300
     )
-    return response.choices[0].message["content"].strip()
+    return response.choices[0].message.content.strip()
 
-# --- Templates ---
-
+# ====== Template Generator ======
 def get_legal_template(data: ContractRequest, clause: str) -> str:
     A, B, D = data.party_a, data.party_b, data.duration
     J = data.jurisdiction
@@ -238,22 +234,29 @@ def get_legal_template(data: ContractRequest, clause: str) -> str:
 
     legal_templates = {
         "nda": f"""NON-DISCLOSURE AGREEMENT\n\nThis Non-Disclosure Agreement is made between {A} and {B}.\n\n1. Term: {D}\n2. Confidentiality: All information exchanged shall be kept confidential.\n3. Legal Clause: {clause}\n4. Jurisdiction: Governed by the laws of India, jurisdiction in {J}.\n\nSigned: {A}, {B}""",
+
         "contractor": f"""INDEPENDENT CONTRACTOR AGREEMENT\n\nThis agreement is made between {A} and {B}.\n\n1. Duration: {D}\n2. Role: Independent Contractor\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "sla": f"""SERVICE LEVEL AGREEMENT\n\nThis agreement is between {A} and {B}.\n\n1. Term: {D}\n2. Services: As per annexure\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "partnership": f"""PARTNERSHIP AGREEMENT\n\nThis partnership is entered between {A} and {B}.\n\n1. Term: {D}\n2. Terms: Equal stake and responsibility\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "sales": f"""SALES AGREEMENT\n\nThis agreement is made between {A} (Seller) and {B} (Buyer).\n\n1. Duration: {D}\n2. Goods/Services: {data.goods_description}\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "employment": f"""EMPLOYMENT AGREEMENT\n\nThis employment agreement is made between {A} and {B}.\n\n1. Position: {data.position}\n2. Duration: {D}\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "lease": f"""LEASE AGREEMENT\n\nThis agreement is made between {A} (Lessor) and {B} (Lessee).\n\n1. Property: {data.property_address}\n2. Duration: {D}\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "mou": f"""MEMORANDUM OF UNDERSTANDING\n\nThis MoU is entered into by {A} and {B}.\n\n1. Term: {D}\n2. Understanding: As per mutual discussion\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}""",
+
         "noncompete": f"""NON-COMPETE AGREEMENT\n\nThis agreement is between {A} and {B}.\n\n1. Duration: {D}\n2. Scope: {data.scope}\n3. Legal Clause: {clause}\n4. Jurisdiction: {J}\n\nSigned: {A}, {B}"""
     }
 
     return legal_templates.get(T, "Invalid contract type.")
 
-# --- PDF Generation ---
-
+# ====== PDF Export ======
 def save_as_pdf(content: str, filename: str = "generated_contract.pdf"):
-    content = content.replace("’", "'").replace("“", '"').replace("”", '"')
+    content = content.replace("’", "'").replace("“", '"').replace("”", '"')  # 🔥 Fix non-latin characters
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -268,8 +271,8 @@ def save_as_pdf(content: str, filename: str = "generated_contract.pdf"):
         pdf.multi_cell(0, 8, line)
     pdf.output(filename)
 
-# --- API Endpoint ---
 
+# ====== API Endpoint ======
 @app.post("/generate")
 def generate_contract(data: ContractRequest):
     try:
@@ -286,4 +289,3 @@ def generate_contract(data: ContractRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Contract generation failed: {str(e)}")
-
