@@ -1,5 +1,3 @@
-# ✅ Simplified Contract Generator using OpenAI API or InLegalBERT – 9 Templates + PDF Export
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, validator
 from typing import Literal, Optional
