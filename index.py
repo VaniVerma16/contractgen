@@ -256,7 +256,10 @@ def get_legal_template(data: ContractRequest, clause: str) -> str:
 
 # ====== PDF Export ======
 def save_as_pdf(content: str, filename: str = "generated_contract.pdf"):
-    content = content.replace("’", "'").replace("“", '"').replace("”", '"')  # 🔥 Fix non-latin characters
+    content = (content.replace("’", "'")
+                  .replace("“", '"')
+                  .replace("”", '"')
+                  .replace("₹", "Rs."))
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
