@@ -204,10 +204,10 @@ def refine_clause_with_legal_expertise(clause: str, contract_type: str) -> str:
 **Legal Framework**: {LEGAL_PROMPTS[contract_type]['context']}
 
 **Must Include**:
-{"".join(f"✓ {req}\n" for req in LEGAL_PROMPTS[contract_type]['requirements'])}
+{"".join(f"✓ {req}" for req in LEGAL_PROMPTS[contract_type]['requirements'])}
 
 **Good Examples**:
-{"".join(f"• {ex}\n" for ex in LEGAL_PROMPTS[contract_type]['examples'])}
+{"".join(f"• {ex}" for ex in LEGAL_PROMPTS[contract_type]['examples'])}
 
 **Refinement Rules**:
 1. Use active voice with "Shall" for obligations
