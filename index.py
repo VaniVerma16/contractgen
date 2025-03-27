@@ -220,7 +220,7 @@ def refine_clause_with_legal_expertise(clause: str, contract_type: str) -> str:
 Refined Clause:"""
 
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo-1106",
+        model="gpt-3.5-turbo-16k",
         messages=[
             {"role": "user", "content": prompt}
         ],
